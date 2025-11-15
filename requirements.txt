@@ -1,4 +1,8 @@
 dash
-pandas
 plotly
+pandas
+numpy
 scikit-learn
+joblib
+gunicorn
+openpyxl

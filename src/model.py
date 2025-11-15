@@ -5,11 +5,11 @@ Funciones relacionadas con el modelo de riesgo de MADly Safe.
 - Carga del modelo entrenado (pipeline de scikit-learn en .joblib)
 - Función calcular_riesgo(...) que recibe el escenario y devuelve:
     * probabilidad estimada de lesión grave (0–1)
-    * lista de 3 franjas alternativas con riesgo algo menor
+    * lista de 3 franjas alternativas con menor riesgo estimado,
+      evaluadas con el propio modelo.
 
-De momento las franjas alternativas se calculan de forma sencilla
-a partir de la probabilidad principal. Más adelante podrías mejorarlo
-probando todas las franjas y eligiendo las de menor riesgo.
+Las franjas alternativas se devuelven con una etiqueta legible,
+por ejemplo: "18:00–21:59 (Opción A)".
 """
 
 from pathlib import Path
@@ -17,30 +17,37 @@ from typing import Tuple
 
 import joblib
 import pandas as pd
-import numpy as np
 
-
-# Ruta por defecto al modelo entrenado (pipeline)
-# Esperamos que exista: madly_safe/models/modelo_logistico_2025.joblib
-MODEL_PATH = Path(__file__).resolve().parents[1] / "models" / "modelo_logistico_2025.joblib"
+# Ruta al modelo entrenado que has elegido como final
+MODEL_PATH = Path(__file__).resolve().parents[1] / "models" / "modelo_mejor_2025.joblib"
 
 # Caché en memoria del modelo para no recargarlo en cada predicción
 _MODELO_CACHE = None
+
+# Lista de franjas horarias que usaremos para evaluar alternativas
+FRANJAS_VALIDAS = [
+    "Noche_madrugada",
+    "Manana_punta",
+    "Manana_media",
+    "Tarde",
+    "Tarde_punta",
+    "Noche",
+]
+
+# Etiquetas legibles para cada franja
+FRANJA_LABELS = {
+    "Noche_madrugada": "00:00–05:59",
+    "Manana_punta": "06:00–09:59",
+    "Manana_media": "10:00–13:59",
+    "Tarde": "14:00–17:59",
+    "Tarde_punta": "18:00–21:59",
+    "Noche": "22:00–23:59",
+}
 
 
 def cargar_modelo(path: Path = MODEL_PATH):
     """
     Carga el modelo entrenado desde disco (solo la primera vez).
-
-    Parameters
-    ----------
-    path : pathlib.Path
-        Ruta al fichero .joblib con el pipeline entrenado.
-
-    Returns
-    -------
-    modelo : sklearn.Pipeline
-        Pipeline con preprocesado + regresión logística.
     """
     global _MODELO_CACHE
 
@@ -48,54 +55,68 @@ def cargar_modelo(path: Path = MODEL_PATH):
         if not path.exists():
             raise FileNotFoundError(
                 "No se ha encontrado el fichero de modelo en: "
-                f"{path}. Asegúrate de haber ejecutado el notebook "
-                "02_modelo_baseline.ipynb y guardado el modelo."
+                f"{path}. Asegúrate de haber guardado el modelo final "
+                "como 'models/modelo_mejor_2025.joblib'."
             )
         _MODELO_CACHE = joblib.load(path)
 
     return _MODELO_CACHE
 
 
-# --- Funciones auxiliares para normalizar valores desde la app ---
+# --- Normalización de valores desde la app ---
 
 
 def _normalizar_dia_semana(dia: str) -> str:
-    """
-    Arregla pequeños detalles entre los valores de la app y los del dataset.
-    """
     if dia == "Miercoles":
-        # En el dataset lo tenemos con tilde
         return "Miércoles"
     return dia
 
 
 def _normalizar_meteo(meteo: str) -> str:
-    """
-    Normaliza los valores de meteorología de la app
-    para aproximarlos a los vistos en el dataset.
-    """
     if meteo is None:
         return meteo
 
     if meteo == "Lluvia debil":
         return "Lluvia débil"
     if meteo == "Lluvia intensa":
-        # En los datos aparecía como 'LLuvia intensa' (doble L)
-        return "LLuvia intensa"
+        return "LLuvia intensa"  # como aparece en algunos datos
     if meteo == "Desconocido":
         return "Se desconoce"
     return meteo
 
 
-# --- Versión DUMMY que usábamos antes (la dejamos por si quieres probar algo) ---
+def _df_para_escenario(tipo_persona: str,
+                       tipo_vehiculo: str,
+                       rango_edad: str,
+                       sexo: str,
+                       distrito: str,
+                       dia_norm: str,
+                       franja: str,
+                       meteo_norm: str) -> pd.DataFrame:
+    """
+    Construye un DataFrame de una fila con el formato que espera el modelo.
+    """
+    return pd.DataFrame(
+        [
+            {
+                "tipo_persona": tipo_persona,
+                "tipo_vehiculo": tipo_vehiculo,
+                "rango_edad": rango_edad,
+                "sexo": sexo,
+                "distrito": distrito,
+                "dia_semana": dia_norm,
+                "franja_horaria": franja,
+                "estado_meteorológico": meteo_norm,
+            }
+        ]
+    )
+
+
+# --- Dummy antiguo (por si necesitas pruebas rápidas) ---
 
 
 def calcular_riesgo_dummy(tipo_persona, tipo_vehiculo, rango_edad, sexo,
                           distrito, dia, franja, meteo) -> Tuple[float, list]:
-    """
-    Calcula un riesgo simulado y tres franjas alternativas a partir del hash
-    del escenario. Sirve como referencia o para pruebas sin modelo real.
-    """
     if None in [tipo_persona, tipo_vehiculo, rango_edad, sexo,
                 distrito, dia, franja, meteo]:
         return None, None
@@ -119,58 +140,51 @@ def calcular_riesgo_dummy(tipo_persona, tipo_vehiculo, rango_edad, sexo,
 def calcular_riesgo(tipo_persona, tipo_vehiculo, rango_edad, sexo,
                     distrito, dia, franja, meteo) -> Tuple[float, list]:
     """
-    Calcula el riesgo de lesión grave usando el modelo entrenado.
-
-    Parameters
-    ----------
-    tipo_persona, tipo_vehiculo, rango_edad, sexo, distrito, dia, franja, meteo : str
-        Describen el escenario elegido en la app.
-
-    Returns
-    -------
-    riesgo_principal : float or None
-        Probabilidad estimada (entre 0 y 1). None si falta algún dato.
-    alternativas : list of (str, float) or None
-        Tres franjas alternativas con riesgo algo menor. De momento se
-        calculan restando un poco a la probabilidad principal.
+    Calcula el riesgo de lesión grave usando el modelo entrenado y
+    genera hasta tres franjas alternativas más seguras.
     """
-    # Si falta algún campo, no podemos predecir
     if None in [tipo_persona, tipo_vehiculo, rango_edad, sexo,
                 distrito, dia, franja, meteo]:
         return None, None
 
-    # Normalizamos valores que difieren ligeramente entre app y dataset
     dia_norm = _normalizar_dia_semana(dia)
     meteo_norm = _normalizar_meteo(meteo)
 
-    # Construimos un DataFrame con una sola fila usando los nombres
-    # de columnas que el modelo vio durante el entrenamiento.
-    datos_escenario = pd.DataFrame(
-        [
-            {
-                "tipo_persona": tipo_persona,
-                "tipo_vehiculo": tipo_vehiculo,
-                "rango_edad": rango_edad,
-                "sexo": sexo,
-                "distrito": distrito,
-                "dia_semana": dia_norm,
-                "franja_horaria": franja,
-                "estado_meteorológico": meteo_norm,
-            }
-        ]
-    )
-
-    # Cargamos el modelo y calculamos la probabilidad de clase positiva (grave=1)
     modelo = cargar_modelo()
-    proba = modelo.predict_proba(datos_escenario)[0, 1]
-    riesgo_principal = float(proba)
 
-    # Generamos tres franjas alternativas con algo menos de riesgo (simplificado).
-    alternativas = [
-        ("Opción A", max(riesgo_principal - 0.10, 0.001)),
-        ("Opción B", max(riesgo_principal - 0.15, 0.001)),
-        ("Opción C", max(riesgo_principal - 0.20, 0.001)),
-    ]
+    # Riesgo franja actual
+    df_actual = _df_para_escenario(
+        tipo_persona, tipo_vehiculo, rango_edad, sexo,
+        distrito, dia_norm, franja, meteo_norm
+    )
+    proba_actual = modelo.predict_proba(df_actual)[0, 1]
+    riesgo_principal = float(proba_actual)
+
+    # Riesgo para todas las franjas
+    riesgos_franjas = []
+    for fr_opt in FRANJAS_VALIDAS:
+        df_opt = _df_para_escenario(
+            tipo_persona, tipo_vehiculo, rango_edad, sexo,
+            distrito, dia_norm, fr_opt, meteo_norm
+        )
+        proba_opt = modelo.predict_proba(df_opt)[0, 1]
+        riesgos_franjas.append((fr_opt, float(proba_opt)))
+
+    # Filtramos la franja actual
+    candidatos = [item for item in riesgos_franjas if item[0] != franja]
+    candidatos_ordenados = sorted(candidatos, key=lambda x: x[1])  # menor riesgo primero
+
+    # Priorizar franjas con menor riesgo que la actual
+    menores = [c for c in candidatos_ordenados if c[1] < riesgo_principal]
+    fusion = menores + [c for c in candidatos_ordenados if c not in menores]
+
+    def _nombre_opcion(idx: int) -> str:
+        return f"Opción {chr(ord('A') + idx)}"
+
+    alternativas = []
+    for idx, (fr_code, proba_alt) in enumerate(fusion[:3]):
+        fr_label = FRANJA_LABELS.get(fr_code, fr_code)
+        display = f"{fr_label} ({_nombre_opcion(idx)})"
+        alternativas.append((display, float(proba_alt)))
 
     return riesgo_principal, alternativas
-
