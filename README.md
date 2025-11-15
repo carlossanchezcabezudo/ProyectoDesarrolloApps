@@ -1,3 +1,7 @@
+> 🌐 **Demo online**: https://madlysafe.onrender.com
+>
+> 📦 **Repositorio GitHub**: https://github.com/carlossanchezcabezudo/ProyectoDesarrolloApps
+
 # 🚦 MADly Safe  
 ### Recomendador de franjas más seguras según perfil y contexto en Madrid
 
@@ -379,4 +383,5 @@ A cambio, abre muchas puertas para evolucionar el proyecto:
   - restricciones de tráfico,
   - eventos puntuales que puedan afectar a la movilidad,
 - o incluso transformar el recomendador en una API detrás de una app móvil o una integración con otros sistemas.
+
 
