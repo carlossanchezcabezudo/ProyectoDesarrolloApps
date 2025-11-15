@@ -141,24 +141,7 @@ Se comparan métricas como:
 *(Aquí puedes rellenar los números concretos si ya los tienes medidos, algo así:  
 “En test, la Regresión Logística obtiene ROC-AUC ≈ 0.xx y F1-macro ≈ 0.xx, mientras que el Random Forest mejora/empeora en…”)*
 
-### 3. Modelo elegido
 
-El modelo que finalmente se integra en la aplicación es una:
-
-> **Regresión Logística con `class_weight="balanced"`**  
-> envuelta en un pipeline con preprocesado (one-hot encoding).
-
-Motivos:
-
-- ofrece un rendimiento competitivo en validación y test,
-- es rápido de entrenar y de servir en una API/app,
-- es sencillo de explicar (coeficientes y odds ratios),
-- se integra de forma limpia en scikit-learn + joblib.
-
-Este pipeline se guarda en:
-
-```text
-models/modelo_mejor_2025.joblib
 ### 3. Modelo elegido
 
 Tras comparar varias familias de modelos, la aplicación se queda con una **Regresión Logística** con `class_weight="balanced"` como corazón de MADly Safe.
@@ -396,3 +379,4 @@ A cambio, abre muchas puertas para evolucionar el proyecto:
   - restricciones de tráfico,
   - eventos puntuales que puedan afectar a la movilidad,
 - o incluso transformar el recomendador en una API detrás de una app móvil o una integración con otros sistemas.
+
